@@ -1,0 +1,19 @@
+# Netlify configuration for the AWS CLF-C02 quiz app.
+# The React + Vite app lives at the repository root, so build from the root.
+
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "20"
+  # Override the Windows-only `script-shell=powershell.exe` from .npmrc so
+  # Netlify's Linux builders use bash. (npm env vars override .npmrc.)
+  NPM_CONFIG_SCRIPT_SHELL = "/bin/bash"
+
+# SPA fallback: any unknown path returns index.html so React Router can
+# resolve client-side routes (/quiz, /results, /browse, etc.) on direct hit.
+[[redirects]]
+  from   = "/*"
+  to     = "/index.html"
+  status = 200
