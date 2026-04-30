@@ -17,10 +17,10 @@ export function Navbar() {
           </div>
           <div className="leading-tight">
             <div className="font-bold text-sm group-hover:text-aws-orange transition-colors">
-              CLF-C02 Quiz
+              Certification Hub
             </div>
             <div className="text-[10px] text-slate-500 -mt-0.5">
-              Cloud Practitioner Practice
+              Multi-cert practice quizzes
             </div>
           </div>
         </Link>

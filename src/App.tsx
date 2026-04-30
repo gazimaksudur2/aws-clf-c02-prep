@@ -19,8 +19,8 @@ export default function App() {
         </Routes>
       </main>
       <footer className="text-center text-xs text-slate-500 py-6">
-        AWS CLF-C02 Practice Quiz · Built from{' '}
-        <span className="text-slate-300">README.md</span> · 597 questions
+        Timed certification quizzes — results and attempt history remain in your
+        browser via localStorage.
       </footer>
     </div>
   );

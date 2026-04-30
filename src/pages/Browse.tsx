@@ -1,16 +1,35 @@
-import { useMemo, useState } from 'react';
-import { getAllQuestions, getAllTopics } from '../hooks/useQuiz';
+import { useEffect, useMemo, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { getQuestionsForExam, getTopicsForExam, listCatalog } from '../utils/exams';
 
 type Filter = 'all' | 'single' | 'multi';
 
 export function Browse() {
-  const allQuestions = useMemo(() => getAllQuestions(), []);
-  const topics = useMemo(() => getAllTopics(), []);
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const catalog = useMemo(() => listCatalog(), []);
+
+  const examParam = searchParams.get('exam');
+  const catalogEntry =
+    catalog.find((e) => e.examId === examParam) ?? catalog[0] ?? null;
+  const examId = catalogEntry?.examId ?? '';
+
+  useEffect(() => {
+    if (!catalogEntry || examParam) return;
+    setSearchParams({ exam: catalogEntry.examId }, { replace: true });
+  }, [catalogEntry, examParam, setSearchParams]);
+
+  const allQuestions = useMemo(() => (examId ? getQuestionsForExam(examId) : []), [
+    examId,
+  ]);
+  const topics = useMemo(() => (examId ? getTopicsForExam(examId) : ['All']), [
+    examId,
+  ]);
 
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
   const [topic, setTopic] = useState('All');
-  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -24,22 +43,60 @@ export function Browse() {
     });
   }, [allQuestions, search, filter, topic]);
 
-  const toggle = (id: number) => {
+  const toggle = (compositeId: string) => {
     setExpanded((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      if (next.has(compositeId)) next.delete(compositeId);
+      else next.add(compositeId);
       return next;
     });
   };
 
+  const examSelect = (id: string) => {
+    const next = new URLSearchParams(searchParams);
+    next.set('exam', id);
+    setSearchParams(next);
+    setTopic('All');
+  };
+
+  if (!examId || !catalogEntry) {
+    return (
+      <div className="card p-10 text-center text-slate-400">
+        No exams found. Add exams to the catalog and redeploy.
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
-      <header className="flex flex-col gap-2">
-        <h1 className="text-2xl md:text-3xl font-extrabold">Browse Questions</h1>
-        <p className="text-sm text-slate-400">
-          All {allQuestions.length} questions with answers revealed.
-        </p>
+      <header className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+        <div>
+          <button
+            type="button"
+            onClick={() => navigate('/')}
+            className="text-xs text-slate-500 hover:text-aws-orange mb-2"
+          >
+            ← Home
+          </button>
+          <h1 className="text-2xl md:text-3xl font-extrabold">Browse Questions</h1>
+          <p className="text-sm text-slate-400">
+            {catalogEntry.code} · answers shown for study only.
+          </p>
+        </div>
+        <label className="text-xs uppercase tracking-wider text-slate-500 font-semibold block w-full md:w-64">
+          Exam
+          <select
+            value={examId}
+            onChange={(e) => examSelect(e.target.value)}
+            className="mt-1 w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-aws-orange"
+          >
+            {catalog.map((e) => (
+              <option key={e.examId} value={e.examId}>
+                {e.code} — {e.title}
+              </option>
+            ))}
+          </select>
+        </label>
       </header>
 
       <section className="card p-4 md:p-5 grid grid-cols-1 md:grid-cols-12 gap-3">
@@ -84,21 +141,22 @@ export function Browse() {
       </section>
 
       <div className="text-sm text-slate-500">
-        Showing {filtered.length} of {allQuestions.length}
+        Showing {filtered.length} of {allQuestions.length} · {examId}
       </div>
 
       <ul className="space-y-3">
         {filtered.slice(0, 200).map((q) => {
-          const isOpen = expanded.has(q.id);
+          const compositeKey = `${q.examId}-${q.id}`;
+          const isOpen = expanded.has(compositeKey);
           return (
-            <li key={q.id} className="card overflow-hidden">
+            <li key={compositeKey} className="card overflow-hidden">
               <button
                 type="button"
-                onClick={() => toggle(q.id)}
+                onClick={() => toggle(compositeKey)}
                 className="w-full text-left px-5 py-4 flex items-start gap-3 hover:bg-slate-900"
               >
-                <span className="text-xs text-slate-500 font-mono mt-1 w-10 shrink-0">
-                  #{q.id}
+                <span className="text-xs text-slate-500 font-mono mt-1 w-12 shrink-0">
+                  {q.examCode} #{q.id}
                 </span>
                 <div className="flex-1">
                   <div className="flex items-center gap-2 mb-1">

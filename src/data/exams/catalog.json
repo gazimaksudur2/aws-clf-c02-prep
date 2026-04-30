@@ -1,0 +1,16 @@
+{
+  "exams": [
+    {
+      "examId": "aws-clf-c02",
+      "code": "CLF-C02",
+      "title": "AWS Certified Cloud Practitioner",
+      "description": "Practice for the foundational cloud certification."
+    },
+    {
+      "examId": "aws-saa-c03",
+      "code": "SAA-C03",
+      "title": "AWS Certified Solutions Architect – Associate",
+      "description": "Architecture-focused scenario questions (practice set)."
+    }
+  ]
+}

@@ -1,46 +1,90 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ProgressBar } from '../components/ProgressBar';
 import { QuestionCard } from '../components/QuestionCard';
 import { useQuiz } from '../hooks/useQuiz';
-import { arraysEqualUnordered } from '../utils/scoring';
+
+function formatCountdown(seconds: number): string {
+  const clamped = Math.max(0, seconds);
+  const m = Math.floor(clamped / 60);
+  const s = clamped % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
 
 export function Quiz() {
   const navigate = useNavigate();
-  const { session, answer, skip, next, prev, finish } = useQuiz();
+  const { session, recordAnswer, skip, next, prev, finish } = useQuiz();
 
   const current = session?.questions[session.currentIndex] ?? null;
-
   const [selected, setSelected] = useState<string[]>([]);
-  const [revealed, setRevealed] = useState(false);
+  const [remainingSec, setRemainingSec] = useState(0);
+  const expiryFiredRef = useRef(false);
 
-  // Reset local state when navigating between questions.
   useEffect(() => {
     if (!current) return;
-    const existing = session?.answers[current.id];
-    if (existing) {
-      setSelected(existing.selectedAnswers);
-      setRevealed(true);
-    } else {
-      setSelected([]);
-      setRevealed(false);
-    }
+    const saved = session?.answers[current.id];
+    setSelected(saved && !saved.skipped ? [...saved.selectedAnswers] : []);
   }, [current, session?.answers]);
 
-  // Redirect home if no active session.
   useEffect(() => {
     if (!session) navigate('/', { replace: true });
   }, [session, navigate]);
 
+  const sessionRef = useRef(session);
+  sessionRef.current = session;
+
+  useEffect(() => {
+    expiryFiredRef.current = false;
+    if (!session || session.finishedAt) return;
+    const expiresAtMs = session.startedAt + session.timeLimitSeconds * 1000;
+
+    const tick = () => {
+      const s = sessionRef.current;
+      if (!s || s.finishedAt) return;
+
+      const ms = expiresAtMs - Date.now();
+      const sec = Math.ceil(Math.max(0, ms) / 1000);
+      setRemainingSec(sec);
+
+      if (
+        ms <= 0 &&
+        !expiryFiredRef.current &&
+        !sessionRef.current?.finishedAt
+      ) {
+        expiryFiredRef.current = true;
+        finish('time_expired');
+        queueMicrotask(() => navigate('/results', { replace: true }));
+      }
+    };
+
+    tick();
+    const intervalId = window.setInterval(tick, 500);
+    return () => window.clearInterval(intervalId);
+  }, [finish, navigate, session?.startedAt, session?.timeLimitSeconds]);
+
+  /** Stop countdown display after session is finalized elsewhere. */
+  useEffect(() => {
+    if (session?.finishedAt) {
+      setRemainingSec(0);
+    }
+  }, [session?.finishedAt]);
+
   const isLast = useMemo(
-    () => session && session.currentIndex === session.questions.length - 1,
+    () => !!session && session.currentIndex === session.questions.length - 1,
     [session],
+  );
+
+  const completeAndGoToResults = useCallback(
+    (reason: 'manual' | 'time_expired') => {
+      finish(reason);
+      queueMicrotask(() => navigate('/results', { replace: true }));
+    },
+    [finish, navigate],
   );
 
   if (!session || !current) return null;
 
   const toggleOption = (optId: string) => {
-    if (revealed) return;
     setSelected((prev) => {
       if (current.isMultiple) {
         return prev.includes(optId)
@@ -51,34 +95,38 @@ export function Quiz() {
     });
   };
 
-  const handleSubmit = () => {
+  const saveAndAdvance = () => {
     if (selected.length === 0) return;
-    answer(current.id, selected);
-    setRevealed(true);
+    recordAnswer(current.id, selected);
+    if (isLast) completeAndGoToResults('manual');
+    else next();
   };
 
   const handleSkip = () => {
     skip(current.id);
-    if (isLast) handleFinish();
+    if (isLast) completeAndGoToResults('manual');
     else next();
   };
-
-  const handleNext = () => {
-    if (isLast) handleFinish();
-    else next();
-  };
-
-  const handleFinish = () => {
-    finish();
-    navigate('/results');
-  };
-
-  const isCorrect = revealed
-    ? arraysEqualUnordered(selected, current.correctAnswers)
-    : false;
 
   return (
     <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="text-sm text-slate-400">
+          <span className="font-semibold text-aws-orange">{session.examCode}</span>{' '}
+          · Question {session.currentIndex + 1} of {session.questions.length}
+        </div>
+        <div
+          className={`font-mono text-lg font-bold tabular-nums px-3 py-1.5 rounded-lg border ${
+            remainingSec <= 60
+              ? 'border-rose-500/60 text-rose-300 bg-rose-500/10'
+              : 'border-slate-700 text-slate-200 bg-slate-900'
+          }`}
+          title={`Total allotted · ${formatCountdown(session.timeLimitSeconds)}`}
+        >
+          ⏱ {formatCountdown(remainingSec)}
+        </div>
+      </div>
+
       <ProgressBar
         current={session.currentIndex + 1}
         total={session.questions.length}
@@ -87,77 +135,40 @@ export function Quiz() {
       <QuestionCard
         question={current}
         selected={selected}
-        revealed={revealed}
+        showSolution={false}
         onToggleOption={toggleOption}
       />
 
-      {revealed && (
-        <div
-          className={`card p-4 flex items-start gap-3 animate-slide-up ${
-            isCorrect ? 'border-emerald-500/40' : 'border-rose-500/40'
-          }`}
-        >
-          <div
-            className={`w-9 h-9 rounded-full flex items-center justify-center font-bold ${
-              isCorrect
-                ? 'bg-emerald-500/20 text-emerald-300'
-                : 'bg-rose-500/20 text-rose-300'
-            }`}
-          >
-            {isCorrect ? '✓' : '✕'}
-          </div>
-          <div className="flex-1">
-            <div
-              className={`font-semibold ${
-                isCorrect ? 'text-emerald-300' : 'text-rose-300'
-              }`}
-            >
-              {isCorrect ? 'Correct!' : 'Incorrect'}
-            </div>
-            <div className="text-sm text-slate-300 mt-0.5">
-              Correct answer{current.correctAnswers.length > 1 ? 's' : ''}:{' '}
-              <span className="font-mono font-semibold text-aws-orange">
-                {current.correctAnswers.join(', ')}
-              </span>
-            </div>
-          </div>
-        </div>
-      )}
-
       <div className="flex flex-wrap items-center gap-3">
         <button
-          onClick={prev}
+          type="button"
+          onClick={() => prev()}
           disabled={session.currentIndex === 0}
           className="btn-ghost"
         >
           ← Prev
         </button>
 
-        {!revealed ? (
-          <>
-            <button onClick={handleSkip} className="btn-secondary">
-              Skip
-            </button>
-            <button
-              onClick={handleSubmit}
-              disabled={selected.length === 0}
-              className="btn-primary ml-auto"
-            >
-              Submit Answer
-            </button>
-          </>
-        ) : (
-          <button onClick={handleNext} className="btn-primary ml-auto">
-            {isLast ? 'Finish Quiz →' : 'Next Question →'}
-          </button>
-        )}
+        <button type="button" onClick={handleSkip} className="btn-secondary">
+          Skip question
+        </button>
 
         <button
-          onClick={handleFinish}
-          className="btn-ghost text-xs"
-          title="End the quiz now"
+          type="button"
+          onClick={saveAndAdvance}
+          disabled={selected.length === 0}
+          className="btn-primary ml-auto"
         >
-          End quiz
+          {isLast ? 'Finish quiz →' : 'Save · next →'}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => completeAndGoToResults('manual')}
+          className="btn-ghost text-xs"
+          title="Submit what you answered so far and view results."
+        >
+          End quiz now
         </button>
       </div>
     </div>

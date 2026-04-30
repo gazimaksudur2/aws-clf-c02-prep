@@ -7,33 +7,34 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import questionsData from '../data/questions.json';
-import type { AnsweredQuestion, Question, QuizSession } from '../types';
+import type {
+  AnsweredQuestion,
+  QuizSession,
+  SubmissionReason,
+} from '../types';
+import {
+  getExamBankMeta,
+  getQuestionsForExam,
+} from '../utils/exams';
 import { pickRandom } from '../utils/shuffle';
-import { arraysEqualUnordered } from '../utils/scoring';
-
-const ALL_QUESTIONS = questionsData as Question[];
-
-export function getAllQuestions(): Question[] {
-  return ALL_QUESTIONS;
-}
-
-export function getAllTopics(): string[] {
-  const set = new Set<string>();
-  for (const q of ALL_QUESTIONS) set.add(q.topic);
-  return ['All', ...Array.from(set).sort()];
-}
+import { timeLimitSecondsFromQuestionCount } from '../utils/timeLimit';
 
 interface QuizContextValue {
   session: QuizSession | null;
-  startQuiz: (count: number, topic?: string) => void;
-  answer: (questionId: number, selected: string[]) => AnsweredQuestion;
+  startQuiz: (examId: string, count: number, topic?: string) => void;
+  recordAnswer: (questionId: number, selected: string[]) => void;
   skip: (questionId: number) => void;
+  /**
+   * Finishes quiz; returns finalized session snapshot (for navigation),
+   * or null if none.
+   */
+  finish: (
+    submittedReason?: SubmissionReason,
+  ) => QuizSession | null;
+  reset: () => void;
   next: () => void;
   prev: () => void;
   goTo: (index: number) => void;
-  finish: () => QuizSession | null;
-  reset: () => void;
   progress: { answered: number; total: number };
 }
 
@@ -42,39 +43,50 @@ const QuizContext = createContext<QuizContextValue | null>(null);
 export function QuizProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<QuizSession | null>(null);
 
-  const startQuiz = useCallback((count: number, topic?: string) => {
-    const pool =
-      topic && topic !== 'All'
-        ? ALL_QUESTIONS.filter((q) => q.topic === topic)
-        : ALL_QUESTIONS;
-    const picked = pickRandom(pool, count);
-    setSession({
-      questions: picked,
-      answers: {},
-      currentIndex: 0,
-      startedAt: Date.now(),
-    });
-  }, []);
+  const startQuiz = useCallback(
+    (examId: string, count: number, topic?: string) => {
+      const meta = getExamBankMeta(examId);
+      if (!meta || count < 1) return;
 
-  const answer = useCallback(
-    (questionId: number, selected: string[]): AnsweredQuestion => {
-      const question = ALL_QUESTIONS.find((q) => q.id === questionId);
-      const isCorrect = question
-        ? arraysEqualUnordered(selected, question.correctAnswers)
-        : false;
-      const entry: AnsweredQuestion = {
-        questionId,
-        selectedAnswers: selected,
-        isCorrect,
-        skipped: false,
-      };
-      setSession((s) =>
-        s ? { ...s, answers: { ...s.answers, [questionId]: entry } } : s,
+      const pool = getQuestionsForExam(examId);
+      const filtered =
+        topic && topic !== 'All'
+          ? pool.filter((q) => q.topic === topic)
+          : pool;
+
+      const picked = pickRandom(filtered, count);
+      if (picked.length === 0) return;
+
+      const timeLimitSeconds = timeLimitSecondsFromQuestionCount(
+        picked.length,
       );
-      return entry;
+
+      setSession({
+        examId,
+        examCode: meta.code,
+        examTitle: meta.title,
+        passThresholdPercent: meta.passThresholdPercent,
+        questions: picked,
+        answers: {},
+        currentIndex: 0,
+        startedAt: Date.now(),
+        timeLimitSeconds,
+      });
     },
     [],
   );
+
+  /** Persists selections only; correctness is evaluated on the results screen. */
+  const recordAnswer = useCallback((questionId: number, selected: string[]) => {
+    const entry: AnsweredQuestion = {
+      questionId,
+      selectedAnswers: selected,
+      skipped: false,
+    };
+    setSession((s) =>
+      s ? { ...s, answers: { ...s.answers, [questionId]: entry } } : s,
+    );
+  }, []);
 
   const skip = useCallback((questionId: number) => {
     setSession((s) =>
@@ -86,7 +98,6 @@ export function QuizProvider({ children }: { children: ReactNode }) {
               [questionId]: {
                 questionId,
                 selectedAnswers: [],
-                isCorrect: false,
                 skipped: true,
               },
             },
@@ -117,34 +128,45 @@ export function QuizProvider({ children }: { children: ReactNode }) {
       s
         ? {
             ...s,
-            currentIndex: Math.max(0, Math.min(index, s.questions.length - 1)),
+            currentIndex: Math.max(
+              0,
+              Math.min(index, s.questions.length - 1),
+            ),
           }
         : s,
     );
   }, []);
 
-  const finish = useCallback((): QuizSession | null => {
-    let finished: QuizSession | null = null;
-    setSession((s) => {
-      if (!s) return s;
-      finished = { ...s, finishedAt: Date.now() };
-      return finished;
-    });
-    return finished;
-  }, []);
+  const finish = useCallback(
+    (submittedReason: SubmissionReason = 'manual'): QuizSession | null => {
+      let finalized: QuizSession | null = null;
+      setSession((s) => {
+        if (!s) return s;
+        finalized = {
+          ...s,
+          finishedAt: Date.now(),
+          submittedReason,
+        };
+        return finalized;
+      });
+      return finalized;
+    },
+    [],
+  );
 
   const reset = useCallback(() => setSession(null), []);
 
   const progress = useMemo(() => {
     if (!session) return { answered: 0, total: 0 };
-    const answered = Object.values(session.answers).filter((a) => !a.skipped).length;
+    const answered = Object.values(session.answers).filter((a) => !a.skipped)
+      .length;
     return { answered, total: session.questions.length };
   }, [session]);
 
   const value: QuizContextValue = {
     session,
     startQuiz,
-    answer,
+    recordAnswer,
     skip,
     next,
     prev,
@@ -159,8 +181,6 @@ export function QuizProvider({ children }: { children: ReactNode }) {
 
 export function useQuiz(): QuizContextValue {
   const ctx = useContext(QuizContext);
-  if (!ctx) {
-    throw new Error('useQuiz must be used within a QuizProvider');
-  }
+  if (!ctx) throw new Error('useQuiz must be used within a QuizProvider');
   return ctx;
 }

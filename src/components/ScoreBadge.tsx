@@ -1,13 +1,14 @@
-import { PASS_THRESHOLD_PERCENT } from '../utils/scoring';
-
-interface Props {
+export function ScoreBadge({
+  correct,
+  total,
+  passThresholdPercent,
+}: {
   correct: number;
   total: number;
-}
-
-export function ScoreBadge({ correct, total }: Props) {
+  passThresholdPercent: number;
+}) {
   const percent = total > 0 ? Math.round((correct / total) * 100) : 0;
-  const passed = percent >= PASS_THRESHOLD_PERCENT;
+  const passed = percent >= passThresholdPercent;
 
   return (
     <div

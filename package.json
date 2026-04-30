@@ -1,14 +1,16 @@
 {
-  "name": "ws-clf-c02-quiz-app",
+  "name": "aws-certification-quiz-app",
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "description": "AWS CLF-C02 practice quiz application built with React + Vite + TypeScript",
+  "description": "Timed multi-certification AWS practice quizzes (React + Vite + TypeScript)",
   "scripts": {
     "dev": "node node_modules/vite/bin/vite.js",
     "build": "node scripts/build.js",
     "preview": "node node_modules/vite/bin/vite.js preview",
-    "parse": "node scripts/parse-questions.js"
+    "parse": "node scripts/parse-questions.js",
+    "ingest:saa": "node scripts/ingest-saa-from-md.mjs",
+    "wrap-clf": "node scripts/wrap-clf-bank.mjs"
   },
   "dependencies": {
     "react": "^18.3.1",

@@ -1,117 +1,71 @@
-# AWS CLF-C02 Practice Quiz App
+# AWS Certification Practice Hub
 
-A modern React + Vite + TypeScript practice app for the AWS Certified Cloud Practitioner (CLF-C02) exam. All 597 questions from the workspace `README.md` are parsed into a structured JSON file and served through a clean, exam-style UI.
+React + Vite + TypeScript app for timed practice quizzes across AWS certifications. Exams are normalized JSON banks under [`src/data/exams/`](src/data/exams/) and listed in [`src/data/exams/catalog.json`](src/data/exams/catalog.json). Attempt history is saved in **localStorage** (key `cert-quiz-history-v2`), with backward migration from legacy `aws-quiz-history`.
 
-## Features
+Included exams today:
 
-- 597 unique questions parsed from the source `README.md`
-- Custom-length random quizzes (5 – 597 questions)
-- Topic filtering (EC2, S3, Billing, IAM, etc.)
-- Single-answer + multi-answer support with proper grading
-- Live answer reveal with correct/incorrect highlighting
-- Score, pass/fail (≥70%), and per-topic breakdown on results
-- Review of all incorrectly answered questions
-- Quiz history persisted in `localStorage`
-- Browse-and-search mode for the entire question bank
+| Code    | Dataset file              | Notes |
+| ------- | ------------------------- | ----- |
+| CLF-C02 | `exams/aws-clf-c02.json`  | Cloud Practitioner — regenerated from sibling `README.md` via `npm run parse` |
+| SAA-C03 | `exams/aws-saa-c03.json`  | Solutions Architect Associate — regenerated from [`public/aws-saa-practice-exam.md`](public/aws-saa-practice-exam.md) via `npm run ingest:saa` |
 
-## Quick Start
+## Flow
+
+1. **Home:** pick a certification, then configure topic + question count (min 5, up to the pool size).
+2. **Quiz:** countdown = **120 seconds × (number of questions in that run)**. No per-question correct/incorrect styling until the quiz ends (or auto-submit when time hits zero).
+3. **Results:** full scoring, topic breakdown, and a **detailed review** of every item (your answers vs keyed answers).
+
+## Scripts
 
 ```bash
-cd aws-quiz-app
 npm install
-npm run parse   # generates src/data/questions.json from ../README.md
-npm run dev     # starts Vite dev server at http://localhost:5173
+npm run dev          # http://localhost:5173
+
+# CLF checklist source (workspace ../README.md) → aws-clf-c02.json
+npm run parse
+
+# SAA markdown → aws-saa-c03.json (content is in public/)
+npm run ingest:saa
+
+# One-off: legacy src/data/questions.json → exams/aws-clf-c02.json wrapper
+npm run wrap-clf
+
+npm run build        # type-check + Vite production bundle
+npm run preview
 ```
 
-## Build
+## Adding a new exam
 
-```bash
-npm run build       # type-checks and builds to dist/
-npm run preview     # serves the production build locally
-```
-
-## How Questions Are Parsed
-
-The script `scripts/parse-questions.js` reads the workspace-root `README.md`, walks every `### …` heading in the questions section, captures the following `- [ ] / - [x]` option lines, and writes a typed JSON array to `src/data/questions.json`:
+1. Add **`src/data/exams/<examId>.json`** with this envelope:
 
 ```json
 {
-  "id": 1,
-  "question": "...",
-  "options": [{ "id": "A", "text": "..." }, ...],
-  "correctAnswers": ["D"],
-  "isMultiple": false,
-  "topic": "EC2"
+  "examId": "my-exam-slug",
+  "code": "ABC-999",
+  "title": "Display title",
+  "passThresholdPercent": 72,
+  "questions": [
+    {
+      "id": 1,
+      "question": "Stem text?",
+      "options": [{ "id": "A", "text": "..." }],
+      "correctAnswers": ["A"],
+      "isMultiple": false,
+      "topic": "DomainOrTopicTag"
+    }
+  ]
 }
 ```
 
-Re-run `npm run parse` whenever the source README is updated to refresh the question pool.
+2. Import the bank inside [`src/utils/exams.ts`](src/utils/exams.ts) (`BANK_MAP`) and append an entry to [`catalog.json`](src/data/exams/catalog.json).
+3. Rebuild; the home grid and browse picker will surface the new catalog row automatically.
 
-## Project Structure
+Paths are statically imported today (simple deploy); splitting by `import()` is an easy follow-on if bundles grow too large.
 
-```
-aws-quiz-app/
-├── scripts/parse-questions.js   # README.md → questions.json
-├── src/
-│   ├── data/questions.json      # generated question bank
-│   ├── types/                   # TypeScript types
-│   ├── hooks/                   # useQuiz (context), useHistory (localStorage)
-│   ├── utils/                   # shuffle, scoring helpers
-│   ├── components/              # Navbar, ProgressBar, QuestionCard, OptionButton, ScoreBadge
-│   └── pages/                   # Home, Quiz, Results, Browse
-└── ...
-```
+## Tech stack
 
-## Tech Stack
+- React 18, TypeScript, Vite 5, React Router 6, Tailwind CSS 3
 
-- React 18 + TypeScript
-- Vite 5
-- React Router 6
-- Tailwind CSS 3
+## Netlify / SPA routing
 
-## Deploy to Netlify
-
-A `netlify.toml` lives at the **workspace root** (one level above this folder) and is already configured:
-
-```toml
-[build]
-  base    = "aws-quiz-app"
-  command = "npm run build"
-  publish = "dist"
-```
-
-It also includes a SPA fallback so client-side routes (`/quiz`, `/results`, `/browse`) work on direct hits or refresh.
-
-### Option 1 — Netlify CLI (one-shot deploy)
-
-From the workspace root (the folder that contains `netlify.toml`):
-
-```bash
-npm install -g netlify-cli
-netlify login
-netlify deploy --build           # creates a draft preview URL
-netlify deploy --build --prod    # promotes to production
-```
-
-### Option 2 — Connect the Git repo
-
-1. Push the workspace to GitHub/GitLab/Bitbucket.
-2. In Netlify: **Add new site → Import an existing project**, pick the repo.
-3. Netlify reads `netlify.toml` automatically — no UI config needed.
-4. Every push to the default branch deploys; every PR gets a preview URL.
-
-### Option 3 — Manual upload
-
-```bash
-cd aws-quiz-app
-npm install
-npm run build
-```
-
-Drag the resulting `aws-quiz-app/dist/` folder onto the Netlify dashboard's deploys page.
-
-### Notes
-
-- Build runs on Linux (Node 20) regardless of where you develop.
-- The Windows-only `.npmrc` (`script-shell=powershell.exe`) is overridden on Netlify via `NPM_CONFIG_SCRIPT_SHELL=/bin/bash` in `netlify.toml`, so it's safe to commit.
-- The build script (`scripts/build.js`) is cross-platform and avoids the `&&` operator (which Windows PowerShell 5.1 doesn't support).
+SPA fallback is configured via `netlify.toml` so `/quiz`, `/results`, `/browse`, and `/browse?exam=…` work on reload.
