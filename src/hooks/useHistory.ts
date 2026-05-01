@@ -10,6 +10,27 @@ export function summarizeAttempts(
   return [...entries].sort((a, b) => b.finishedAt - a.finishedAt);
 }
 
+/** Keep only the N most recent finished attempts per certification (`examId`). */
+const MAX_ATTEMPTS_PER_EXAM = 10;
+
+export function trimAttemptsPerExam(
+  entries: AttemptHistoryEntry[],
+): AttemptHistoryEntry[] {
+  const byExamId = new Map<string, AttemptHistoryEntry[]>();
+  for (const e of entries) {
+    const bucket = byExamId.get(e.examId) ?? [];
+    bucket.push(e);
+    byExamId.set(e.examId, bucket);
+  }
+  const kept: AttemptHistoryEntry[] = [];
+  for (const list of byExamId.values()) {
+    kept.push(
+      ...summarizeAttempts(list).slice(0, MAX_ATTEMPTS_PER_EXAM),
+    );
+  }
+  return summarizeAttempts(kept);
+}
+
 function migrateLegacyAttempts(rawEntries: unknown): AttemptHistoryEntry[] {
   if (!Array.isArray(rawEntries)) return [];
   return rawEntries.filter(Boolean).map((e) => {
@@ -55,19 +76,30 @@ function loadAttempts(): AttemptHistoryEntry[] {
         'schemaVersion' in parsed &&
         Array.isArray((parsed as HistoryStoreV2).attempts)
       ) {
-        return (parsed as HistoryStoreV2).attempts.filter(Boolean);
+        const rawAttempts = (parsed as HistoryStoreV2).attempts.filter(Boolean);
+        const loaded = trimAttemptsPerExam(rawAttempts);
+        if (loaded.length !== rawAttempts.length) {
+          persist(loaded);
+        }
+        return loaded;
       }
       if (Array.isArray(parsed)) {
         const migratedFromV2Bare = parsed.every((x): x is AttemptHistoryEntry => {
           if (x === null || typeof x !== 'object') return false;
           return 'examId' in x && 'startedAt' in x && 'finishedAt' in x;
         });
-        if (migratedFromV2Bare) return parsed as AttemptHistoryEntry[];
+        if (migratedFromV2Bare) {
+          const loaded = trimAttemptsPerExam(parsed as AttemptHistoryEntry[]);
+          if (loaded.length !== parsed.length) persist(loaded);
+          return loaded;
+        }
       }
     }
     const legacy = localStorage.getItem(STORAGE_KEY_LEGACY);
     if (legacy) {
-      const migrated = migrateLegacyAttempts(JSON.parse(legacy));
+      const migrated = trimAttemptsPerExam(
+        migrateLegacyAttempts(JSON.parse(legacy)),
+      );
       persist(migrated);
       localStorage.removeItem(STORAGE_KEY_LEGACY);
       return migrated;
@@ -77,8 +109,6 @@ function loadAttempts(): AttemptHistoryEntry[] {
   }
   return [];
 }
-
-const HISTORY_CAP = 200;
 
 export function useHistory() {
   const [attempts, setAttempts] = useState<AttemptHistoryEntry[]>([]);
@@ -96,7 +126,7 @@ export function useHistory() {
           h.finishedAt === entry.finishedAt,
       );
       if (duplicate) return prev;
-      const next = summarizeAttempts([entry, ...prev]).slice(0, HISTORY_CAP);
+      const next = trimAttemptsPerExam(summarizeAttempts([entry, ...prev]));
       persist(next);
       return next;
     });
@@ -109,9 +139,8 @@ export function useHistory() {
 
   const clearExam = useCallback((examId: string) => {
     setAttempts((prev) => {
-      const next = summarizeAttempts(prev.filter((a) => a.examId !== examId)).slice(
-        0,
-        HISTORY_CAP,
+      const next = trimAttemptsPerExam(
+        summarizeAttempts(prev.filter((a) => a.examId !== examId)),
       );
       persist(next);
       return next;

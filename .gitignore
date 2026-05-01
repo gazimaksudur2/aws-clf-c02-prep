@@ -10,3 +10,6 @@ dist-ssr
 
 prompts.txt
 .cursorignore
+
+public/*.md
+public/*.txt
